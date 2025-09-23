@@ -1,0 +1,16 @@
+# Ignore Docker volume mounts and document source
+chroma_db/
+model_cache/
+documents/
+
+# Python
+__pycache__/
+.venv/
+*.pyc
+*.bak
+
+# macOS
+.DS_Store
+
+# Logs
+*.log

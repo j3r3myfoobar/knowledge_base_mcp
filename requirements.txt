@@ -1,0 +1,18 @@
+fastapi
+uvicorn[standard]
+chromadb
+pydantic
+langchain
+langchain-community
+langchain-core
+langchain-huggingface
+langdetect
+langchain-chroma
+langchain-unstructured
+sentence-transformers
+# For document loading
+unstructured[all-docs]
+pdf2image
+pytesseract
+pypdf
+fastmcp

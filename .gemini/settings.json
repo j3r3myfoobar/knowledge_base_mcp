@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "knowledge_base": {
+      "httpUrl": "http://localhost:8001/mcp"
+    }
+  }
+}

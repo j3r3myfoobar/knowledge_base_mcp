@@ -1,0 +1,22 @@
+services:
+  chroma:
+    image: chromadb/chroma
+    ports:
+      - "8000:8000"
+    environment:
+      - CHROMA_SERVER_DATABASE_DIR=/data
+    volumes:
+      - ./chroma_db:/data
+
+  mcp_server:
+    build: .
+    ports:
+      - "8001:8000"
+    environment:
+      - RE_INGEST=${RE_INGEST:-false}
+      - DOCS_DIR=${DOCS_DIR:-./documents}
+    command: ["python", "main.py"]
+    volumes:
+      - .:/app
+    depends_on:
+      - chroma
