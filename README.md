@@ -25,6 +25,18 @@ This leads to:
 *   **Overlap Preservation:** A small overlap between chunks is still maintained to ensure that context is not lost at chunk boundaries.
 
 This updated method of splitting documents by their semantic structure (like paragraphs or sections) rather than by a fixed size results in a significant improvement in the quality of the retrieved context, and therefore, the quality of the LLM's answers.
+
+### Two-Stage Retrieval: Re-ranking for Relevance
+
+To further enhance the quality of the retrieved context, this project implements a two-stage retrieval process that includes a re-ranker.
+
+1.  **Initial Retrieval:** The system first retrieves a larger set of documents from ChromaDB (e.g., the top 20) that are broadly relevant to the user's query. This initial step prioritizes recall, ensuring a wide net is cast.
+
+2.  **Re-ranking:** The retrieved documents are then passed to a `CrossEncoder` model. This model scores each document's relevance to the specific query. Unlike the initial retrieval, which just measures similarity, the re-ranker performs a more sophisticated analysis of the relationship between the query and the document.
+
+3.  **Final Selection:** The documents are then sorted by their new relevance scores, and only the top N (e.g., 5) are selected to be included in the context sent to the LLM. This final step prioritizes precision, ensuring that the context is as relevant and noise-free as possible.
+
+This re-ranking step significantly improves the signal-to-noise ratio of the context, leading to more accurate and focused answers from the LLM.
 - **`main.py`**: A FastAPI server that provides a simple API to interact with the knowledge base. It exposes a `/query` endpoint that accepts a natural language query and returns the most relevant document chunks.
 - **`docker-compose.yml`**: Manages the two main services:
     -   `ingester`: A short-lived service that runs `ingest.py` to update the knowledge base.

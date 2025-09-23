@@ -19,6 +19,9 @@ ENV NLTK_DATA=/app/nltk_data
 # Pre-download the sentence-transformer model
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
+# Pre-download the cross-encoder model
+RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+
 COPY . .
 
 CMD ["python", "main.py"]
