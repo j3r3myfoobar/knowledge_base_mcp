@@ -12,20 +12,19 @@ The project consists of a few key components:
 
 - **`ingest.py`**: A script that scans the `documents` directory for supported files (PDFs, text files, Markdown, etc.). To speed up the process, it uses all available CPU cores to process files in parallel. It splits the documents into manageable chunks and stores their vector embeddings in a ChromaDB database. This script is designed to be idempotent, only updating the database when files are new or have been modified.
 
-### RAG Principles: Chunking and Retrieval Considerations
+### Better Chunking During Ingestion: A Semantic Approach
 
-For effective Retrieval-Augmented Generation (RAG), documents are broken down into smaller, semantically coherent "chunks" during ingestion. This is crucial for several reasons:
+For effective Retrieval-Augmented Generation (RAG), documents must be broken down into smaller, semantically coherent "chunks." Instead of using a fixed character count, this project now employs a more intelligent, semantic-based approach.
 
-*   **LLM Context Window Limits:** Large Language Models (LLMs) have a finite input size (context window). Sending entire large documents would quickly exceed this limit.
-*   **Retrieval Precision:** Smaller chunks allow for more precise vector embeddings, improving the accuracy of the semantic search.
+We now use `UnstructuredLoader` in `"elements"` mode, which breaks a document down into its semantic parts (e.g., `Title`, `NarrativeText`, `ListItem`). The new function `group_elements_into_chunks` then intelligently combines these elements into chunks of a desired size. This ensures that paragraphs, list items, and titles stay together, creating far more coherent and meaningful chunks for the LLM.
 
-The `ingest.py` script currently uses a **chunk size of 1000 characters** with a **chunk overlap of 200 characters**. The `chunk_overlap` helps maintain context across chunk boundaries.
+This leads to:
 
-When a query is made via the `/query` endpoint, the `query_knowledge_base` tool retrieves the `top_k` most relevant chunks from the ChromaDB. The current `top_k` value is set to **10**.
+*   **Better Context:** By keeping related sentences and semantic units together, the context provided to the LLM is much richer and more accurate.
+*   **Improved Retrieval:** Semantic chunking leads to more precise vector embeddings, which in turn improves the accuracy of the search results.
+*   **Overlap Preservation:** A small overlap between chunks is still maintained to ensure that context is not lost at chunk boundaries.
 
-It's important to note that the sum of the content of these `top_k` chunks (plus the query and any other prompt instructions) must fit within the context window of the LLM you are using. For reference, this Gemini model has a context window of **1 million tokens**.
-
-Optimizing `chunk_size`, `chunk_overlap`, and `top_k` is an iterative process that depends on your specific documents and the LLM being used, aiming to balance retrieval relevance, LLM comprehension, and cost efficiency.
+This updated method of splitting documents by their semantic structure (like paragraphs or sections) rather than by a fixed size results in a significant improvement in the quality of the retrieved context, and therefore, the quality of the LLM's answers.
 - **`main.py`**: A FastAPI server that provides a simple API to interact with the knowledge base. It exposes a `/query` endpoint that accepts a natural language query and returns the most relevant document chunks.
 - **`docker-compose.yml`**: Manages the two main services:
     -   `ingester`: A short-lived service that runs `ingest.py` to update the knowledge base.

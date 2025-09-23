@@ -2,188 +2,250 @@ import logging
 import os
 import chromadb
 import argparse
+import nltk
+from concurrent.futures import ProcessPoolExecutor, as_completed
+
+
+from typing import Dict, Any, List
 from langchain_unstructured import UnstructuredLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores.utils import filter_complex_metadata
+from langchain.docstore.document import Document
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from langdetect import detect, LangDetectException
-from langchain_community.vectorstores.utils import filter_complex_metadata
 
-# Configure logging to output debug messages
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Ensure NLTK data path is known
+nltk.data.path.append("/app/nltk_data")
 
-# --- Configuration ---
-COLLECTION_NAME = "knowledge_base"
+# Centralize settings for easier management
+CONFIG = {
+    "chroma_host": "chroma",
+    "chroma_port": 8000,
+    "collection_name": "knowledge_base",
+    "embedding_model": "all-MiniLM-L6-v2",
+    "docs_dir": "./documents",
+    "chunk_size": 512,  # Optimal size for MiniLM can be smaller
+    "chunk_overlap": 50,
+    "ingestion_batch_size": 5000,
+    "max_workers": os.cpu_count()
+    or 4,  # Use available CPU cores for parallel processing
+}
 
-# --- ChromaDB Client ---
-# Connect to ChromaDB running in Docker
-client = chromadb.HttpClient(host="chroma", port=8000)
-
-# --- Embeddings Model ---
-embedding_function = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
-# --- LangChain Chroma Integration ---
-vectorstore = Chroma(
-    client=client,
-    collection_name=COLLECTION_NAME,
-    embedding_function=embedding_function,
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-
-def get_known_documents_from_db():
-    """Retrieves metadata for all documents currently in the vector store."""
-    print("Querying database for existing document metadata...")
-    try:
-        existing_docs = vectorstore.get(include=["metadatas"])
-        known_docs = {}
-        if existing_docs and existing_docs.get("metadatas"):
-            for metadata in existing_docs["metadatas"]:
-                source = metadata.get("source")
-                last_modified = metadata.get("last_modified")
-                if source:
-                    if source not in known_docs or last_modified > known_docs[source]:
-                        known_docs[source] = last_modified
-        print(f"Found {len(known_docs)} known documents in the database.")
-        return known_docs
-    except chromadb.errors.NotFoundError:
-        print("Collection not found. Returning empty list of documents.")
-        return {}
+# --- Global Clients (Initialized once) ---
+try:
+    client = chromadb.HttpClient(host=CONFIG["chroma_host"], port=CONFIG["chroma_port"])
+    embedding_function = HuggingFaceEmbeddings(model_name=CONFIG["embedding_model"])
+    vectorstore = Chroma(
+        client=client,
+        collection_name=CONFIG["collection_name"],
+        embedding_function=embedding_function,
+    )
+    logging.info("Successfully connected to ChromaDB.")
+except Exception as e:
+    logging.critical(f"Failed to connect to ChromaDB or initialize embeddings: {e}")
+    exit(1)
 
 
-def get_filesystem_documents(docs_dir):
-    """Scans the documents directory and returns a dict of {filepath: last_modified_time}."""
-    print(f"Scanning for documents in '{docs_dir}'...")
-    fs_docs = {}
-    for root, _, files in os.walk(docs_dir):
-        for filename in files:
-            if filename.startswith("."):
-                continue
-            filepath = os.path.join(root, filename)
-            try:
-                fs_docs[filepath] = os.path.getmtime(filepath)
-            except OSError:
-                print(f"Could not read metadata for {filepath}, skipping.")
-    print(f"Found {len(fs_docs)} documents on the filesystem.")
-    return fs_docs
+def group_elements_into_chunks(
+    elements: List[Any], chunk_size: int, chunk_overlap: int
+) -> List[Document]:
+    """
+    Instead of arbitrarily splitting text, this function groups semantic elements
+    (like paragraphs, titles, list items) from `unstructured` into coherent chunks.
+    It now correctly handles different object types returned by the loader.
+    """
+    chunks = []
+    current_chunk_text = ""
+
+    for el in elements:
+        element_text = getattr(el, "text", getattr(el, "page_content", ""))
+        if not element_text:
+            continue
+
+        # If adding the next element fits, append it
+        if len(current_chunk_text) + len(element_text) <= chunk_size:
+            current_chunk_text += "\n\n" + element_text
+        else:
+            # If the chunk is full, create a Document and start a new one
+            if current_chunk_text:
+                chunks.append(
+                    Document(
+                        page_content=current_chunk_text.strip(), metadata=el.metadata
+                    )
+                )
+
+            # Start the new chunk with an overlap from the end of the last one
+            overlap = current_chunk_text[-chunk_overlap:] if chunk_overlap > 0 else ""
+            current_chunk_text = overlap + element_text
+
+    # Add the last remaining chunk
+    if current_chunk_text:
+        # Use the metadata from the last processed element
+        last_metadata = elements[-1].metadata if elements else {}
+        chunks.append(
+            Document(page_content=current_chunk_text.strip(), metadata=last_metadata)
+        )
+
+    return chunks
 
 
-def process_file(file_item):
-    """Worker function to load, split, and prepare a single file."""
+def process_file(file_item: tuple) -> List[Document]:
+    """Worker function to load, semantically chunk, and prepare a single file."""
     filepath, last_modified = file_item
-    print(f"--- Starting processing for: {filepath} with strategy: fast ---")
+    logging.info(f"--- Starting processing for: {filepath} ---")
     try:
-        loader = UnstructuredLoader(filepath, strategy="auto", mode="elements")
-        documents = loader.load()
+        # `unstructured` identifies elements like 'Title', 'NarrativeText', 'ListItem'
+        loader = UnstructuredLoader(filepath, mode="elements", strategy="auto")
+        elements = loader.load()
 
-        if not documents:
-            print(f"--- No content extracted from {filepath}, skipping. ---")
+        if not elements:
+            logging.warning(f"--- No content extracted from {filepath}, skipping. ---")
             return []
 
-        for doc in documents:
-            doc.metadata = {
-                "source": doc.metadata["source"],
-                "last_modified": int(last_modified), # Store as integer
-            }
+        # Group elements into meaningful chunks
+        splits = group_elements_into_chunks(
+            elements, CONFIG["chunk_size"], CONFIG["chunk_overlap"]
+        )
 
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, chunk_overlap=200
+        # Enrich metadata for all chunks from this file
+        for split in splits:
+            split.metadata["source"] = filepath
+            split.metadata["last_modified"] = int(last_modified)
+
+        # Filter out complex metadata types that ChromaDB might not handle
+        final_splits = filter_complex_metadata(splits)
+
+        logging.info(
+            f"--- Finished splitting {os.path.basename(filepath)} into {len(final_splits)} semantic chunks. ---"
         )
-        splits = text_splitter.split_documents(documents)
-        print(
-            f"--- Finished splitting {os.path.basename(filepath)} into {len(splits)} chunks. ---"
-        )
-        return splits
+        return final_splits
     except Exception as e:
-        print(f"--- Error processing {filepath}: {e} ---")
+        logging.error(f"--- Error processing {filepath}: {e} ---")
         return []
 
 
-def ingest_new_or_modified_documents(files_to_add):
-    """Loads, splits, and ingests a list of new or modified documents serially."""
+def ingest_documents(files_to_add: Dict[str, float]):
+    """Loads, splits, and ingests documents in parallel."""
     if not files_to_add:
-        print("No new or modified documents to ingest.")
+        logging.info("No new or modified documents to ingest.")
         return
 
-    print(
-        f"Ingesting {len(files_to_add)} new or modified documents in a single process..."
+    logging.info(
+        f"Ingesting {len(files_to_add)} documents using up to {CONFIG['max_workers']} processes..."
     )
 
     all_splits = []
-    for file_item in files_to_add.items():
-        result = process_file(file_item)
-        if result:
-            all_splits.extend(result)
+    # Use a process pool to handle files in parallel, significantly speeding up ingestion
+    with ProcessPoolExecutor(max_workers=CONFIG["max_workers"]) as executor:
+        future_to_file = {
+            executor.submit(process_file, item): item for item in files_to_add.items()
+        }
+        for future in as_completed(future_to_file):
+            try:
+                result = future.result()
+                if result:
+                    all_splits.extend(result)
+            except Exception as e:
+                logging.error(f"A worker process failed: {e}")
 
     if not all_splits:
-        print("No content could be extracted from the documents.")
+        logging.warning("No content could be extracted from the documents.")
         return
 
-    print(f"\nTotal new chunks to add: {len(all_splits)}")
-    print("Adding chunks to the vector store...")
-    batch_size = 5000
+    logging.info(f"Total new chunks to add: {len(all_splits)}")
+    logging.info("Adding chunks to the vector store in batches...")
+
+    batch_size = CONFIG["ingestion_batch_size"]
     for i in range(0, len(all_splits), batch_size):
         batch = all_splits[i : i + batch_size]
+        logging.info(f"Adding batch of {len(batch)} chunks...")
         vectorstore.add_documents(documents=batch)
-        print(
-            f"  - Adding batch {i // batch_size + 1}/{(len(all_splits) + batch_size - 1) // batch_size} ({len(batch)} chunks)..."
-        )
+
+    logging.info("Finished adding all chunks to the vector store.")
 
 
-def delete_documents(files_to_delete):
-    """Deletes all chunks associated with a list of file paths from the vector store."""
+def delete_documents(files_to_delete: List[str]):
+    """
+    Deletes all chunks associated with a list of file paths from the vector store.
+    This version is much more efficient as it minimizes database calls.
+    """
     if not files_to_delete:
-        print("No documents to delete.")
+        logging.info("No documents to delete.")
         return
 
-    print(f"Deleting {len(files_to_delete)} documents from the vector store...")
+    logging.info(f"Deleting {len(files_to_delete)} documents from the vector store...")
 
-    for filepath in files_to_delete:
-        print(f"  - Deleting chunks for: {filepath}")
-        all_docs = vectorstore.get(include=["metadatas"])
-        ids_to_delete = [
-            doc_id
-            for doc_id, metadata in zip(all_docs["ids"], all_docs["metadatas"])
-            if metadata.get("source") == filepath
-        ]
+    # Build a filter to find all chunks from the specified source files in one go
+    # Note: ChromaDB's `where` filter syntax may vary. This is a common pattern.
+    where_filter = {"source": {"$in": files_to_delete}}
 
-        if ids_to_delete:
-            print(f"    - Found {len(ids_to_delete)} chunks to delete.")
-            vectorstore.delete(ids=ids_to_delete)
-        else:
-            print(f"    - No chunks found for {filepath} (this might be unexpected).")
+    # Get all document IDs that match the filter
+    existing_docs = vectorstore.get(where=where_filter, include=["metadatas"])
+    ids_to_delete = existing_docs.get("ids", [])
+
+    if ids_to_delete:
+        logging.info(
+            f"Found {len(ids_to_delete)} chunks across {len(files_to_delete)} files to delete."
+        )
+        vectorstore.delete(ids=ids_to_delete)
+    else:
+        logging.warning("Did not find any chunks to delete for the specified files.")
 
 
-def synchronize_vectorstore(docs_dir):
+def synchronize_vectorstore(docs_dir: str):
     """Main function to synchronize the vector store with the documents directory."""
-    print("\n--- Starting Vector Store Synchronization ---")
+    logging.info("\n--- Starting Vector Store Synchronization ---")
 
-    known_docs = get_known_documents_from_db()
-    fs_docs = get_filesystem_documents(docs_dir)
+    # 1. Get known documents from DB
+    existing_docs = vectorstore.get(include=["metadatas"])
+    known_docs = {}
+    if existing_docs and existing_docs.get("metadatas"):
+        for metadata in existing_docs["metadatas"]:
+            source = metadata.get("source")
+            if source:
+                last_mod = metadata.get("last_modified", 0)
+                if source not in known_docs or last_mod > known_docs[source]:
+                    known_docs[source] = last_mod
+    logging.info(f"Found metadata for {len(known_docs)} documents in the database.")
 
+    # 2. Get documents on filesystem
+    fs_docs = {}
+    for root, _, files in os.walk(docs_dir):
+        for filename in files:
+            if not filename.startswith("."):
+                filepath = os.path.join(root, filename)
+                fs_docs[filepath] = os.path.getmtime(filepath)
+    logging.info(f"Found {len(fs_docs)} documents on the filesystem.")
+
+    # 3. Determine changes
     known_paths = set(known_docs.keys())
     fs_paths = set(fs_docs.keys())
 
-    paths_to_delete = known_paths - fs_paths
-    if paths_to_delete:
-        delete_documents(list(paths_to_delete))
+    paths_to_delete = list(known_paths - fs_paths)
+    delete_documents(paths_to_delete)
 
     files_to_add = {}
-    new_paths = fs_paths - known_paths
-    for path in new_paths:
+    # Add brand new files
+    for path in fs_paths - known_paths:
         files_to_add[path] = fs_docs[path]
 
-    potentially_modified_paths = fs_paths.intersection(known_paths)
-    for path in potentially_modified_paths:
-        fs_mtime = int(fs_docs[path])
-        db_mtime = int(known_docs.get(path, 0))
-        if fs_mtime > db_mtime:
-            print(f"Document '{path}' has been modified. Re-ingesting.")
+    # Add modified files (and re-ingest)
+    for path in fs_paths.intersection(known_paths):
+        if int(fs_docs[path]) > int(known_docs.get(path, 0)):
+            logging.info(
+                f"Document '{path}' has been modified. Scheduling for re-ingestion."
+            )
+            # First delete the old versions, then add the new one
             delete_documents([path])
             files_to_add[path] = fs_docs[path]
 
-    ingest_new_or_modified_documents(files_to_add)
+    # 4. Ingest new and modified files
+    ingest_documents(files_to_add)
 
-    print("\n--- Synchronization Complete! ---")
+    logging.info("\n--- Synchronization Complete! ---")
 
 
 if __name__ == "__main__":
@@ -193,27 +255,23 @@ if __name__ == "__main__":
     parser.add_argument(
         "--docs_dir",
         type=str,
-        default="./documents",
-        help="The directory where the documents are stored.",
+        default=CONFIG["docs_dir"],
+        help="Directory with documents.",
     )
     parser.add_argument(
         "--re-ingest",
         action="store_true",
-        help="Force a full re-ingestion by deleting the existing collection.",
+        help="Force re-ingestion by deleting the existing collection.",
     )
     args = parser.parse_args()
 
     if args.re_ingest:
-        print("Performing a full reset of the collection...")
-        try:
-            client.delete_collection(name=COLLECTION_NAME)
-        except Exception as e:
-            print(f"Could not delete collection (it might not exist): {e}")
-
-        vectorstore = Chroma(
-            client=client,
-            collection_name=COLLECTION_NAME,
-            embedding_function=embedding_function,
+        logging.warning(
+            f"--- Deleting existing collection '{CONFIG['collection_name']}' as requested. ---"
         )
+        try:
+            client.delete_collection(name=CONFIG["collection_name"])
+        except Exception as e:
+            logging.error(f"Could not delete collection (it might not exist): {e}")
 
     synchronize_vectorstore(args.docs_dir)

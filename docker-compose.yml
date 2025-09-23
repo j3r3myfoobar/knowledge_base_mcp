@@ -15,6 +15,7 @@ services:
     environment:
       - RE_INGEST=${RE_INGEST:-false}
       - DOCS_DIR=${DOCS_DIR:-./documents}
+      - NLTK_DATA=/app/nltk_data
     command: ["python", "main.py"]
     volumes:
       - .:/app
