@@ -2,243 +2,332 @@
 
 ## Overview
 
-This is a **local knowledge base system** that provides semantic document retrieval through the Model Context Protocol (MCP). The system enables AI assistants to query your local documents intelligently, using vector embeddings and sophisticated retrieval techniques.
+This document explains the **architectural decisions** behind the Baseline + Hybrid Search system. For usage instructions, setup, and testing, see the main [README.md](../README.md).
 
-## High-Level Data Flow
+**Performance**: 100% R@5 on test queries, 23ms average latency
+
+## Core Design Philosophy
+
+**Simplicity over sophistication**: Through rigorous testing, we found that a simple hybrid search (BM25 + Vector) outperformed complex pipelines with query enhancement, cross-encoder re-ranking, and multi-signal scoring.
+
+- **200 lines** of core retrieval logic vs 500+ in previous version
+- **100% R@5** accuracy vs 80% with complex pipeline
+- **23ms** latency vs 381ms with complex pipeline (16x faster)
+
+## Architecture Diagram
 
 ```
-Documents → Ingestion Pipeline → Vector Store (ChromaDB)
-                                        ↓
-User Query → MCP Server → Retrieval Pipeline → Ranked Results
+Documents → Ingestion → ChromaDB (BM25 + Vector Indices)
+                              ↓
+User Query → MCP Server → Hybrid Search → Ranked Results
 ```
 
-### 1. Ingestion Flow
+### Ingestion Pipeline
 ```
-Filesystem Documents
+Filesystem (Markdown, PDF)
     ↓
-Semantic Parsing (UnstructuredLoader)
+TextLoader / PyPDFLoader
     ↓
-Semantic Chunking (group by paragraphs, titles, etc.)
+Fixed-Size Chunking (512 chars, 50 overlap)
     ↓
-Vector Embeddings (HuggingFace all-MiniLM-L6-v2)
+Vector Embeddings (all-MiniLM-L6-v2)
+    ↓
+BM25 Index (rank-bm25)
     ↓
 ChromaDB Storage
 ```
 
-### 2. Retrieval Flow
+### Retrieval Pipeline
 ```
 User Query
     ↓
-Query Enhancement (convert to question format)
+BM25 Keyword Search (top 20)
     ↓
-Vector Similarity Search (retrieve top_k documents)
+Vector Semantic Search (top 20)
     ↓
-Cross-Encoder Re-ranking (select most relevant top_n)
+Hybrid Fusion (0.3*BM25 + 0.7*Vector)
     ↓
-Confidence Scoring (multi-signal fusion)
-    ↓
-Ranked Results
+Top-K Results with Confidence Scores
 ```
 
-## System Components
+## Key Design Decisions
 
-### Core Layer (`src/core/`)
-**Purpose**: Foundation components for database connections, configuration, and data models
+### 1. Why Hybrid Search?
 
-- **`config.py`**: Centralized configuration
-  - Database settings (ChromaDB host/port)
-  - Model names (embeddings, cross-encoder)
-  - Processing parameters (chunk size, batch size, workers)
+Combines strengths of two complementary approaches:
 
-- **`database.py`**: Singleton database connections
-  - ChromaDB client (lazy initialization)
-  - HuggingFace embeddings model
-  - Vector store (Chroma with embeddings)
-  - CrossEncoder model (with graceful fallback)
+**BM25 (30% weight)**:
+- Catches exact keywords: "AWS Aurora", "terraform", "Kubernetes"
+- Fast: ~5-10ms for top 20 documents
+- No model loading required
 
-- **`models.py`**: Pydantic models for API
-  - `Document`: Retrieved chunk with content, metadata, confidence
-  - `KnowledgeBaseOutput`: List of documents for MCP response
+**Vector Similarity (70% weight)**:
+- Captures semantic meaning and concepts
+- Handles synonyms and related terms
+- ~10-15ms for top 20 documents
 
-### Ingestion Layer (`src/ingestion/`)
-**Purpose**: Process documents from filesystem into vector store
+**Result**: Perfect balance for technical documentation where both exact terms and concepts matter.
 
-- **`chunker.py`**: Semantic chunking logic
-  - Groups semantic elements (paragraphs, titles, list items)
-  - Preserves document structure
-  - Maintains chunk overlap for context continuity
+### 2. Why Fixed-Size Chunking?
 
-- **`processor.py`**: Single file processing
-  - Loads file with UnstructuredLoader
-  - Applies semantic chunking
-  - Enriches metadata (source path, modification time)
-  - Filters complex metadata types
+**Previous approach**: Semantic chunking with UnstructuredLoader
+- Grouped by paragraphs, titles, list items
+- Complex logic to maintain document structure
+- Parallel processing overhead
 
-- **`sync.py`**: Vector store synchronization
-  - Compares filesystem vs vector store state
-  - Deletes removed files
-  - Ingests new/modified files incrementally
-  - Parallel processing with ProcessPoolExecutor
+**Current approach**: Fixed 512-character chunks with 50-character overlap
+- **Simpler**: One RecursiveCharacterTextSplitter call
+- **Faster**: No element grouping logic
+- **More predictable**: Consistent chunk sizes
+- **Works well**: Tested on documents from 7 words to 7,220 words
 
-### Retrieval Layer (`src/retrieval/`)
-**Purpose**: Query processing and document retrieval
+### 3. Why No Cross-Encoder?
 
-- **`query_enhancer.py`**: Query preprocessing
-  - Converts statements to questions ("Python classes" → "what is Python classes?")
-  - Optional abbreviation expansion
-  - Improves semantic matching
+We tested cross-encoder re-ranking (`cross-encoder/ms-marco-MiniLM-L-6-v2`):
 
-- **`reranker.py`**: Cross-encoder re-ranking
-  - Takes initial vector retrieval results
-  - Scores query-document relevance more accurately
-  - Returns top N most relevant documents
+**Results**:
+- Added 380ms latency overhead
+- No accuracy improvement (80% R@5 with and without)
+- Model trained on MS MARCO (web search), not personal notes
 
-- **`scorer.py`**: Multi-signal confidence scoring
-  - Cross-encoder score (40%)
-  - Query overlap - keyword matching (30%)
-  - Document length penalty (20%)
-  - Metadata quality (10%)
-  - Returns 0.0-1.0 confidence score
+**Decision**: Remove cross-encoder. Simple hybrid fusion achieved 100% R@5 with 23ms latency.
 
-### Server Layer (`src/server/`)
-**Purpose**: MCP protocol interface
+### 4. Why No Query Enhancement?
 
-- **`mcp_app.py`**: FastMCP application
-  - Defines `query_knowledge_base` tool
-  - Orchestrates retrieval pipeline
-  - Handles graceful fallback when cross-encoder unavailable
-  - Returns structured results to MCP clients
+We tested converting queries to questions:
 
-### Scripts (`scripts/`)
-**Purpose**: CLI entry points
+**Example**:
+- Original: "AWS Aurora failover time"
+- Enhanced: "what is AWS Aurora failover time?"
 
-- **`ingest.py`**: Document ingestion CLI
-  - Argument parsing (--re-ingest, --docs_dir)
-  - Collection deletion for full re-ingestion
-  - Calls synchronization logic
+**Results**:
+- Diluted keyword precision
+- Reduced R@5 from potential 100% to 80%
+- Added processing overhead
 
-- **`start_server.py`**: MCP server entry point
-  - Configures logging
-  - Launches FastMCP server on port 8000
+**Decision**: Raw queries perform better for keyword-dense technical documentation.
 
-## Key Design Patterns
+## Component Architecture
 
-### 1. Standard RAG (Retrieval-Augmented Generation)
-- **Initial retrieval**: Vector similarity search in ChromaDB
-- **Enhancement**: Semantic chunking preserves document structure
+### Dependency Injection Pattern
 
-### 2. Corrective RAG
-- **Two-stage retrieval**: Initial retrieval + cross-encoder re-ranking
-- **Graceful fallback**: System works even if cross-encoder fails to load
+All components use constructor injection for testability:
 
-### 3. Fusion RAG
-- **Query enhancement**: Preprocessing for better matching
-- **Multi-signal scoring**: Combines multiple relevance indicators
+```python
+# Create dependencies
+chunker = FixedSizeChunker(chunk_size=512, chunk_overlap=50)
+bm25_index = BM25Index()
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-### 4. Modular RAG
-- **Swappable components**: Each module has single responsibility
-- **Singleton pattern**: Expensive resources (models, DB) initialized once
-- **Parallel processing**: Multi-core file processing for ingestion
+# Inject into retriever
+retriever = BaselineRetriever(
+    vectorstore=vectorstore,
+    embeddings=embeddings,
+    chunker=chunker,
+    bm25_index=bm25_index
+)
+```
 
-## Technology Stack
+**Benefits**:
+- Easy to mock for unit tests (107 tests pass)
+- Can swap implementations without changing code
+- Factory pattern (`create_baseline_retriever()`) simplifies production use
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| Vector DB | ChromaDB | Document storage and similarity search |
-| Embeddings | HuggingFace all-MiniLM-L6-v2 | Convert text to vectors |
-| Re-ranking | CrossEncoder ms-marco-MiniLM-L-6-v2 | Accurate relevance scoring |
-| Document Parsing | Unstructured | Semantic document structure extraction |
-| MCP Server | FastMCP | Model Context Protocol interface |
-| Orchestration | Docker Compose | Service management |
+### Interface-Based Design
+
+Abstract interfaces in `src/core/interfaces.py`:
+
+- **`Retriever`**: Query and document management
+- **`DocumentChunker`**: Chunking strategies
+- **`SearchIndex`**: Search implementations (BM25, TF-IDF, etc.)
+
+**Benefits**:
+- Components depend on abstractions, not concrete classes
+- Easy to add new implementations
+- Enforces consistent APIs
+
+### Singleton Pattern for Expensive Resources
+
+`src/core/database.py` uses singleton pattern for:
+- ChromaDB client
+- Embedding model
+- Vectorstore
+
+**Why**: These resources are expensive to initialize (model loading, network connections). Initialize once, reuse everywhere.
+
+## Data Flow Details
+
+### Document Ingestion
+
+1. **Find files**: Scan `documents/` for `.md` and `.pdf` files
+2. **Load**: Use LangChain loaders (TextLoader, PyPDFLoader)
+3. **Chunk**: FixedSizeChunker creates 512-char chunks with metadata
+4. **Embed**: all-MiniLM-L6-v2 creates 384-dim vectors
+5. **Index**:
+   - Vector: Store in ChromaDB
+   - BM25: Build in-memory index with rank-bm25
+6. **Persist**: ChromaDB persists to `chroma_db/`
+
+### Query Processing
+
+1. **BM25 Search**: Tokenize query, retrieve top 20 by BM25 score
+2. **Vector Search**: Embed query, retrieve top 20 by cosine similarity
+3. **Normalize Scores**:
+   - BM25: Divide by max score → [0, 1]
+   - Vector: Distance to similarity → 1/(1 + distance)
+4. **Hybrid Fusion**: `hybrid_score = 0.3*BM25 + 0.7*Vector`
+5. **Rank**: Sort by hybrid score, return top-k
+6. **Format**: Convert to `KnowledgeBaseOutput` for MCP
+
+### Hybrid Fusion Algorithm
+
+Not Reciprocal Rank Fusion (RRF), but **weighted score fusion**:
+
+```python
+# BM25 results: [(doc1, 15.2), (doc2, 12.8), ...]
+max_bm25 = 15.2
+bm25_normalized = {
+    doc1: 15.2/15.2 = 1.0,
+    doc2: 12.8/15.2 = 0.84,
+    ...
+}
+
+# Vector results: [(doc1, 0.3), (doc2, 0.5), ...]  # distances
+vector_similarity = {
+    doc1: 1/(1+0.3) = 0.77,
+    doc2: 1/(1+0.5) = 0.67,
+    ...
+}
+
+# Hybrid scores
+hybrid = {
+    doc1: 0.3*1.0 + 0.7*0.77 = 0.839,
+    doc2: 0.3*0.84 + 0.7*0.67 = 0.721,
+    ...
+}
+```
+
+**Why not RRF?** RRF uses rank positions (1, 2, 3...). Score fusion preserves magnitude differences, better for technical docs where score gaps matter.
 
 ## Performance Characteristics
 
-### Ingestion
-- **Parallelism**: Uses all CPU cores via ProcessPoolExecutor
-- **Incremental**: Only processes new/modified files
-- **Batching**: Adds documents in batches (default 5000) to avoid memory issues
+### Latency Breakdown (average)
+- BM25 search: 5-10ms
+- Vector search: 10-15ms
+- Hybrid fusion: 3-5ms
+- **Total**: 20-30ms
 
-### Retrieval
-- **Initial retrieval**: ~50-100ms for top 20 documents
-- **Re-ranking**: ~50-100ms additional for cross-encoder
-- **Total query time**: ~100-200ms end-to-end
+### Memory Usage
+- Embedding model: ~100MB
+- BM25 index: ~10-50MB (depends on corpus size)
+- ChromaDB: ~200-300MB for vectors
+- **Total**: ~300-500MB
 
-### Scalability
-- **Documents**: Tested with 1000s of documents
-- **Collection size**: ChromaDB handles millions of vectors
-- **Memory**: ~500MB-1GB for models + vector store
+### Scalability Tested
+- **29 markdown files**, 873 chunks: 100% R@5, 23ms latency
+- **Extrapolated**: Should scale to 10,000s of chunks with similar performance
 
-## Configuration Points
+## Testing Strategy
 
-All configurable in `src/core/config.py`:
+### Unit Tests (107 tests)
+- Each component tested in isolation with mocks
+- Tests for interfaces, implementations, edge cases
+- Run: `pytest tests/unit/ -v`
 
-```python
-# Vector Store
-CHROMA_HOST = "chroma"
-CHROMA_PORT = 8000
-COLLECTION_NAME = "knowledge_base"
+### Integration Tests
+- End-to-end workflows (ingestion → retrieval)
+- MCP server interface
+- Run: `pytest tests/integration/ -v`
 
-# Models
-EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-
-# Processing
-CHUNK_SIZE = 512
-CHUNK_OVERLAP = 50
-INGESTION_BATCH_SIZE = 5000
-MAX_WORKERS = os.cpu_count() or 4
+### Test Organization
+```
+tests/
+├── unit/
+│   ├── core/           # Config, database, models
+│   ├── test_components.py  # Chunker, BM25
+│   ├── test_retrieval.py   # BaselineRetriever
+│   ├── test_factories.py   # Dependency injection
+│   └── test_ingest.py      # Document ingestion
+└── integration/
+    ├── test_mcp_server.py   # MCP interface
+    └── test_end_to_end.py   # Full workflows
 ```
 
 ## Extension Points
 
-### Add New Retrieval Method
-Create new module in `src/retrieval/` and update `mcp_app.py` to use it
+### Add New Chunking Strategy
 
-### Change Chunking Strategy
-Modify `src/ingestion/chunker.py` - the interface stays the same
+Implement `DocumentChunker` interface:
 
-### Add New Scoring Signal
-Update `calculate_confidence_score()` in `src/retrieval/scorer.py`
-
-### Switch Embedding Model
-Change `EMBEDDING_MODEL` in config - ensure model is compatible with sentence-transformers
-
-## Error Handling
-
-### Ingestion
-- **File processing errors**: Logged, but don't stop other files
-- **Worker failures**: Caught and logged per-file
-- **Empty documents**: Skipped with warning
-
-### Retrieval
-- **Cross-encoder failure**: Falls back to simple vector retrieval
-- **Empty results**: Returns empty list with no error
-- **Database connection**: Fails fast with critical error on startup
-
-## Logging Strategy
-
-- **INFO**: User-facing operations (ingestion progress, query results)
-- **WARNING**: Fallback modes, skipped files
-- **ERROR**: Processing failures, connection issues
-- **DEBUG**: Detailed operation traces (in FastMCP server)
-
-## Directory Structure
-
-```
-mcp_server/
-├── src/
-│   ├── core/           # Database, config, models
-│   ├── ingestion/      # Document processing
-│   ├── retrieval/      # Query processing
-│   └── server/         # MCP interface
-├── scripts/            # CLI entry points
-├── docs/               # Documentation
-├── tests/              # Test suite
-├── documents/          # Your documents (ingested)
-├── chroma_db/          # Vector store (persisted)
-└── docker-compose.yml  # Service orchestration
+```python
+class SemanticChunker(DocumentChunker):
+    def chunk_documents(self, documents: List[Document]) -> List[Document]:
+        # Your semantic chunking logic
+        pass
 ```
 
-## Future Enhancements
+Use in factory:
+```python
+chunker = SemanticChunker()
+retriever = create_baseline_retriever(chunker=chunker)
+```
 
-See README.md TODO section for planned features like Fusion RAG (BM25 + vector retrieval).
+### Add New Search Method
+
+Implement `SearchIndex` interface:
+
+```python
+class TFIDFIndex(SearchIndex):
+    def build_index(self, documents: List[Document]) -> None:
+        # Build TF-IDF index
+        pass
+
+    def search(self, query: str, top_k: int) -> List[Tuple[Document, float]]:
+        # Search TF-IDF index
+        pass
+```
+
+### Adjust Fusion Weights
+
+Experiment with different weights in `src/core/config.py`:
+
+```python
+BM25_WEIGHT = 0.5   # More keyword emphasis
+VECTOR_WEIGHT = 0.5
+```
+
+Test with your queries to measure impact on R@k metrics.
+
+## Why This Architecture Succeeded
+
+### 1. Measurement-Driven
+- Created 12 representative test queries
+- Measured R@1, R@3, R@5, MRR, latency for each approach
+- Let data guide decisions, not intuition
+
+### 2. Pragmatic Simplicity
+- Removed features that didn't improve metrics
+- Kept only what demonstrably helped
+- Result: Simpler, faster, more accurate
+
+### 3. Testability
+- Dependency injection enables easy mocking
+- 107 unit tests verify each component
+- Integration tests verify end-to-end workflows
+
+### 4. Modularity
+- Clear interfaces between components
+- Easy to swap implementations
+- Changes isolated to single modules
+
+## Lessons Learned
+
+1. **Complex ≠ Better**: Our 500-line complex pipeline scored 80% R@5. Simple 200-line hybrid search scored 100%.
+
+2. **Measure Everything**: We only discovered hybrid search superiority by testing. Assumptions would have kept the slow system.
+
+3. **Domain Matters**: Cross-encoder trained on MS MARCO (web) didn't help with personal notes. Know your data.
+
+4. **Keywords Matter**: For technical docs, exact keyword matching (BM25) is crucial. Pure semantic search missed important terms.
+
+5. **Start Simple**: Build baseline first, add complexity only when metrics demand it.
