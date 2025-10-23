@@ -7,10 +7,24 @@ documents/
 __pycache__/
 .venv/
 *.pyc
+*.pyo
 *.bak
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
 
 # macOS
 .DS_Store
 
 # Logs
 *.log
+
+# AI Assistant files (Claude, Gemini, etc.)
+CLAUDE.md
+GEMINI.md
+.claude/
+.gemini/
+
+# Development documentation archive
+docs/archive/

@@ -24,4 +24,7 @@ RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cro
 
 COPY . .
 
-CMD ["python", "main.py"]
+# Install the package in editable mode
+RUN pip install -e .
+
+CMD ["python", "scripts/start_server.py"]

@@ -10,6 +10,7 @@ langdetect
 langchain-chroma
 langchain-unstructured
 sentence-transformers
+rank-bm25
 # For document loading
 unstructured[all-docs]
 pdf2image
