@@ -239,20 +239,6 @@ hybrid = {
 - MCP server interface
 - Run: `pytest tests/integration/ -v`
 
-### Test Organization
-```
-tests/
-├── unit/
-│   ├── core/           # Config, database, models
-│   ├── test_components.py  # Chunker, BM25
-│   ├── test_retrieval.py   # BaselineRetriever
-│   ├── test_factories.py   # Dependency injection
-│   └── test_ingest.py      # Document ingestion
-└── integration/
-    ├── test_mcp_server.py   # MCP interface
-    └── test_end_to_end.py   # Full workflows
-```
-
 ## Extension Points
 
 ### Add New Chunking Strategy
@@ -297,28 +283,6 @@ VECTOR_WEIGHT = 0.5
 ```
 
 Test with your queries to measure impact on R@k metrics.
-
-## Why This Architecture Succeeded
-
-### 1. Measurement-Driven
-- Created 12 representative test queries
-- Measured R@1, R@3, R@5, MRR, latency for each approach
-- Let data guide decisions, not intuition
-
-### 2. Pragmatic Simplicity
-- Removed features that didn't improve metrics
-- Kept only what demonstrably helped
-- Result: Simpler, faster, more accurate
-
-### 3. Testability
-- Dependency injection enables easy mocking
-- 107 unit tests verify each component
-- Integration tests verify end-to-end workflows
-
-### 4. Modularity
-- Clear interfaces between components
-- Easy to swap implementations
-- Changes isolated to single modules
 
 ## Lessons Learned
 
