@@ -395,8 +395,8 @@ docker-compose run --rm mcp_server python scripts/ingest.py --docs_dir ./documen
 
 ### For Keyword-Dense Documents (profiles, resumes, specs)
 - Use **specific keywords** that match document content
-- ✅ Good: `"Jeremy Lemaire Solution Architect AWS Lambda Kubernetes"`
-- ❌ Poor: `"who is Jeremy Lemaire and what are his skills"`
+- ✅ Good: `"Jeremy Solution Architect AWS Lambda Kubernetes"`
+- ❌ Poor: `"who is Jeremy and what are his skills"`
 
 ### For Narrative Documents (books, articles, docs)
 - Natural language questions work well
