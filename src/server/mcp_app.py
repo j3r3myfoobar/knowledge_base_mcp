@@ -9,10 +9,6 @@ SIMPLIFIED ARCHITECTURE:
 - Direct confidence scoring: Based on hybrid fusion score
 
 Performance: 100% R@5, 23ms average latency (16x faster than previous)
-
-SOLID Principles Applied:
-- Depends on Retriever interface, not concrete implementation (Dependency Inversion)
-- Can swap retriever implementations without changing this code
 """
 
 import logging

@@ -2,11 +2,6 @@
 Document chunking components.
 
 Implements the DocumentChunker interface with various chunking strategies.
-
-SOLID Principles Applied:
-- Single Responsibility: Only handles document chunking
-- Open/Closed: Easy to add new chunking strategies
-- Interface Segregation: Implements focused DocumentChunker interface
 """
 
 import logging

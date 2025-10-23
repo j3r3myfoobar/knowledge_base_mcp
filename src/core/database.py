@@ -1,15 +1,14 @@
 """
-PATTERN: Modular RAG - Centralized database connections and model initialization.
+Centralized database connections and model initialization.
 Handles the connection to ChromaDB and the initialization of embedding models.
 This module ensures that clients are initialized only once and shared across the application.
-Implements singleton pattern for expensive resources (embeddings, cross-encoder models).
+Implements singleton pattern for expensive resources (embeddings).
 """
 
 import logging
 import chromadb
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from sentence_transformers import CrossEncoder
 
 # Import centralized configuration
 from src.core.config import (
@@ -17,7 +16,6 @@ from src.core.config import (
     CHROMA_PORT,
     COLLECTION_NAME,
     EMBEDDING_MODEL,
-    CROSS_ENCODER_MODEL,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,19 +65,3 @@ def get_vectorstore():
             logger.critical(f"Failed to connect to vector store: {e}")
             raise
     return _clients["vectorstore"]
-
-
-def get_cross_encoder():
-    """
-    PATTERN: Corrective RAG - CrossEncoder model for document re-ranking.
-    Initializes and returns the CrossEncoder model with graceful error handling.
-    """
-    if "cross_encoder" not in _clients:
-        try:
-            _clients["cross_encoder"] = CrossEncoder(CROSS_ENCODER_MODEL)
-            logger.info(f"Successfully loaded CrossEncoder model: {CROSS_ENCODER_MODEL}")
-        except Exception as e:
-            logger.error(f"Failed to load CrossEncoder model: {e}")
-            # PATTERN: Corrective RAG - Graceful fallback when model fails to load
-            _clients["cross_encoder"] = None
-    return _clients["cross_encoder"]

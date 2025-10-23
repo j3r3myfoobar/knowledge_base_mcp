@@ -64,41 +64,6 @@ class TestDatabaseConnections:
         # Should only initialize once
         mock_embeddings.assert_called_once()
 
-    @patch("src.core.database.CrossEncoder")
-    def test_get_cross_encoder_success(self, mock_cross_encoder):
-        """Test successful cross-encoder initialization."""
-        mock_encoder = MagicMock()
-        mock_cross_encoder.return_value = mock_encoder
-
-        encoder = database.get_cross_encoder()
-
-        assert encoder == mock_encoder
-        mock_cross_encoder.assert_called_once_with(
-            "cross-encoder/ms-marco-MiniLM-L-6-v2"
-        )
-
-    @patch("src.core.database.CrossEncoder")
-    def test_get_cross_encoder_fallback(self, mock_cross_encoder):
-        """Test CrossEncoder failure returns None for graceful fallback."""
-        mock_cross_encoder.side_effect = Exception("Model loading failed")
-
-        encoder = database.get_cross_encoder()
-
-        assert encoder is None
-
-    @patch("src.core.database.CrossEncoder")
-    def test_get_cross_encoder_singleton(self, mock_cross_encoder):
-        """Test cross-encoder singleton behavior."""
-        mock_encoder = MagicMock()
-        mock_cross_encoder.return_value = mock_encoder
-
-        encoder1 = database.get_cross_encoder()
-        encoder2 = database.get_cross_encoder()
-
-        assert encoder1 == encoder2
-        # Should only initialize once
-        mock_cross_encoder.assert_called_once()
-
     @patch("src.core.database.Chroma")
     @patch("src.core.database.get_embedding_function")
     @patch("src.core.database.get_chroma_client")
@@ -176,14 +141,3 @@ class TestDatabaseConnections:
 
         # Verify correct model name from config
         mock_embeddings.assert_called_once_with(model_name=EMBEDDING_MODEL)
-
-    @patch("src.core.database.CrossEncoder")
-    def test_cross_encoder_configuration(self, mock_cross_encoder):
-        """Test that cross-encoder uses correct model configuration."""
-        from src.core.config import CROSS_ENCODER_MODEL
-
-        mock_cross_encoder.return_value = MagicMock()
-        database.get_cross_encoder()
-
-        # Verify correct model name from config
-        mock_cross_encoder.assert_called_once_with(CROSS_ENCODER_MODEL)

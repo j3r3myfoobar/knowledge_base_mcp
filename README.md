@@ -142,10 +142,10 @@ curl http://localhost:8001/health
 
 Run unit tests:
 ```bash
-# All tests (41 tests)
+# All tests 
 pytest
 
-# Retrieval tests only (11 tests)
+# Retrieval tests only 
 pytest tests/unit/test_retrieval.py
 
 # With verbose output

@@ -3,11 +3,6 @@ Core interfaces for the knowledge base system.
 
 These abstract base classes define the contracts that implementations must follow,
 enabling dependency inversion and making the system more testable and extensible.
-
-SOLID Principles Applied:
-- Interface Segregation: Separate interfaces for different concerns
-- Dependency Inversion: Depend on abstractions, not concretions
-- Open/Closed: Open for extension (new implementations) without modification
 """
 
 from abc import ABC, abstractmethod
@@ -237,34 +232,6 @@ class SearchStrategy(ABC):
 
         Returns:
             List of result dictionaries with content, metadata, confidence
-        """
-        pass
-
-
-class RerankerStrategy(ABC):
-    """
-    Interface for re-ranking strategies.
-
-    Abstracts different re-ranking approaches (cross-encoder, LLM-based, etc.)
-    """
-
-    @abstractmethod
-    def rerank(
-        self,
-        query: str,
-        documents: List[Document],
-        top_k: int = 5
-    ) -> List[tuple]:
-        """
-        Re-rank documents based on relevance to query.
-
-        Args:
-            query: Original search query
-            documents: List of candidate documents
-            top_k: Number of results to return
-
-        Returns:
-            List of (document, score) tuples, sorted by relevance
         """
         pass
 

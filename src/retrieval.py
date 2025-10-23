@@ -6,15 +6,11 @@ This is a simplified RAG system that combines keyword matching (BM25) with
 semantic search (vector similarity) for robust retrieval across diverse document types.
 
 Architecture:
-- Composed of smaller, focused components (Single Responsibility)
+- Composed of smaller, focused components
 - Hybrid search (BM25 + Vector fusion)
 - Metadata filtering (type: personal_note vs technical_doc)
 - Simple confidence scoring (hybrid score)
-
-SOLID Principles Applied (Improvement #3):
-- Single Responsibility: Delegates to specialized components
-- Dependency Injection: All dependencies injected via constructor
-- Composition over inheritance: Composes DocumentChunker and BM25Index
+- Dependency injection for all components
 """
 
 import logging
@@ -43,16 +39,11 @@ class BaselineRetriever(Retriever):
     """
     Baseline RAG with Hybrid Search (BM25 + Vector).
 
-    Now follows Single Responsibility Principle by composing specialized components:
+    Composed of specialized components:
     - DocumentChunker handles chunking
     - BM25Index handles keyword search
     - VectorStore handles semantic search
     - BaselineRetriever orchestrates hybrid search
-
-    SOLID Principles Applied:
-    - Single Responsibility: Only orchestrates hybrid search
-    - Dependency Injection: All components injected
-    - Composition: Composes smaller, focused components
     """
 
     def __init__(
@@ -71,19 +62,14 @@ class BaselineRetriever(Retriever):
         Initialize baseline retriever with dependency injection.
 
         Args:
-            vectorstore: Optional vectorstore instance (DI)
-            embeddings: Optional embedding function (DI)
-            chroma_client: Optional ChromaDB client (DI)
-            chunker: Optional DocumentChunker instance (DI) - NEW in #3
-            bm25_index: Optional SearchIndex instance (DI) - NEW in #3
+            vectorstore: Optional vectorstore instance
+            embeddings: Optional embedding function
+            chroma_client: Optional ChromaDB client
+            chunker: Optional DocumentChunker instance
+            bm25_index: Optional SearchIndex instance
             collection_name: ChromaDB collection name
             chroma_host: ChromaDB host (used only if not provided)
             chroma_port: ChromaDB port (used only if not provided)
-
-        SOLID Improvement #3 - Component Composition:
-            - Chunker handles document chunking (Single Responsibility)
-            - BM25Index handles keyword search (Single Responsibility)
-            - Retriever only orchestrates hybrid search (Single Responsibility)
 
         Example (with full DI - recommended):
             chunker = FixedSizeChunker(chunk_size=512)
@@ -154,34 +140,26 @@ class BaselineRetriever(Retriever):
         """
         Chunk documents using the injected chunker component.
 
-        SOLID Improvement #3: Delegates to DocumentChunker (Single Responsibility)
-
         Args:
             documents: Raw documents to chunk
 
         Returns:
             Chunked documents with metadata
         """
-        # Delegate to chunker component
         return self.chunker.chunk_documents(documents)
 
     def build_bm25_index(self, documents: List[Document]) -> None:
         """
         Build BM25 index using the injected BM25 index component.
 
-        SOLID Improvement #3: Delegates to SearchIndex (Single Responsibility)
-
         Args:
             documents: Documents to index
         """
-        # Delegate to BM25 index component
         self.bm25_index.build_index(documents)
 
     def bm25_search(self, query: str, top_k: int = 20) -> List[Tuple[Document, float]]:
         """
         Keyword search using BM25 index component.
-
-        SOLID Improvement #3: Delegates to SearchIndex (Single Responsibility)
 
         Args:
             query: Search query
@@ -190,7 +168,6 @@ class BaselineRetriever(Retriever):
         Returns:
             List of (Document, score) tuples
         """
-        # Delegate to BM25 index component
         return self.bm25_index.search(query, top_k=top_k)
 
     def vector_search(

@@ -6,10 +6,6 @@ Works with current simplified system (src/retrieval.py).
 Usage:
     python scripts/ingest.py --docs_dir ./documents
     python scripts/ingest.py --docs_dir ./documents --re-ingest
-
-SOLID Principles Applied:
-- Depends on Retriever interface, not concrete implementation (Dependency Inversion)
-- Can work with any Retriever implementation
 """
 import argparse
 import logging
@@ -34,7 +30,7 @@ class DocumentIngester:
     """
     Handles document ingestion into baseline_kb collection.
 
-    SOLID: Depends on Retriever interface (Dependency Inversion Principle)
+    Depends on the Retriever interface for flexibility.
     """
 
     def __init__(

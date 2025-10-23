@@ -2,11 +2,6 @@
 BM25 search index component.
 
 Implements the SearchIndex interface for keyword-based search using BM25.
-
-SOLID Principles Applied:
-- Single Responsibility: Only handles BM25 indexing and search
-- Open/Closed: Can add other search indexes (TF-IDF, Elasticsearch, etc.)
-- Interface Segregation: Implements focused SearchIndex interface
 """
 
 import logging

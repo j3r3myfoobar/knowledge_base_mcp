@@ -3,11 +3,6 @@ Factory functions for creating system components.
 
 Centralizes object creation and dependency wiring, implementing the Factory pattern.
 This makes it easy to create properly configured objects without repeating setup code.
-
-SOLID Principles Applied:
-- Single Responsibility: Each factory creates one type of component
-- Dependency Inversion: Factories wire up dependencies according to interfaces
-- Open/Closed: Easy to add new factories without modifying existing ones
 """
 
 import logging
@@ -133,7 +128,7 @@ def create_baseline_retriever(
     """
     Factory function to create BaselineRetriever with all dependencies.
 
-    SOLID Improvement #3: Now creates and injects component dependencies:
+    Creates and injects all component dependencies:
     - DocumentChunker for chunking
     - BM25Index for keyword search
     - VectorStore for semantic search
@@ -178,7 +173,7 @@ def create_baseline_retriever(
         embedding_function=embeddings
     )
 
-    # NEW: Create component dependencies (SOLID Improvement #3)
+    # Create component dependencies
     chunker = create_chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
     bm25_index = create_bm25_index()
 
