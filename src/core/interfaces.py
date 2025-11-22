@@ -24,7 +24,7 @@ class Retriever(ABC):
         query: str,
         top_k: int = 5,
         use_hybrid: bool = True,
-        filter_type: Optional[str] = None
+        filter_type: Optional[str] = None,
     ) -> List[Dict]:
         """
         Query the knowledge base and return relevant documents.
@@ -155,10 +155,7 @@ class VectorStore(ABC):
 
     @abstractmethod
     def similarity_search_with_score(
-        self,
-        query: str,
-        k: int = 5,
-        filter: Optional[Dict] = None
+        self, query: str, k: int = 5, filter: Optional[Dict] = None
     ) -> List[tuple]:
         """
         Search for similar documents using vector similarity.
@@ -217,10 +214,7 @@ class SearchStrategy(ABC):
 
     @abstractmethod
     def search(
-        self,
-        query: str,
-        top_k: int = 5,
-        filter_metadata: Optional[Dict] = None
+        self, query: str, top_k: int = 5, filter_metadata: Optional[Dict] = None
     ) -> List[Dict]:
         """
         Execute search using this strategy.
@@ -234,24 +228,3 @@ class SearchStrategy(ABC):
             List of result dictionaries with content, metadata, confidence
         """
         pass
-
-
-# Example Usage (for documentation):
-"""
-# Before (tightly coupled):
-retriever = BaselineRetriever(
-    chroma_host="chroma",
-    chroma_port=8000,
-    collection_name="baseline_kb"
-)
-app = MCPApp(retriever)  # Tightly coupled to BaselineRetriever
-
-# After (loosely coupled via interface):
-retriever: Retriever = BaselineRetriever(...)  # Type hint to interface
-app = MCPApp(retriever)  # Depends on Retriever interface
-
-# Can easily swap implementations:
-retriever: Retriever = HyDERetriever(...)
-retriever: Retriever = ColBERTRetriever(...)
-retriever: Retriever = MockRetriever(...)  # For testing
-"""

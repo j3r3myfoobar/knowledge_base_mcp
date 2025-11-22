@@ -7,8 +7,8 @@ This makes it easy to create properly configured objects without repeating setup
 
 import logging
 import chromadb
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_chroma import Chroma
 
 from src.core.config import (
     CHROMA_HOST,

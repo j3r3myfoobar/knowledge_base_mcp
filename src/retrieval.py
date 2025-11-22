@@ -17,8 +17,8 @@ import logging
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.docstore.document import Document
 import numpy as np
 
