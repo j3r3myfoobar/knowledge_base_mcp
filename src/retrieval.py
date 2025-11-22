@@ -26,6 +26,7 @@ from src.core.config import (
     EMBEDDING_MODEL,
     BM25_WEIGHT,
     VECTOR_WEIGHT,
+    BATCH_SIZE,
 )
 from src.core.interfaces import Retriever, DocumentChunker, SearchIndex
 from src.components.chunker import FixedSizeChunker
@@ -346,11 +347,14 @@ class BaselineRetriever(Retriever):
 
     def add_documents(self, documents: List[Document]) -> None:
         """
-        Add documents to the vector store.
+        Add documents to the vector store in batches.
 
         Implements the Retriever interface by delegating to the underlying
         vectorstore. This abstraction allows clients to add documents without
         directly accessing the vectorstore implementation.
+
+        Documents are processed in batches to avoid exceeding ChromaDB's
+        maximum batch size limit.
 
         Args:
             documents: List of documents to add to the knowledge base
@@ -364,9 +368,20 @@ class BaselineRetriever(Retriever):
             retriever.add_documents(docs)
         """
         try:
-            logger.info(f"Adding {len(documents)} documents to vectorstore...")
-            self.vectorstore.add_documents(documents)
-            logger.info(f"✅ Successfully added {len(documents)} documents")
+            total_docs = len(documents)
+            logger.info(f"Adding {total_docs} documents to vectorstore in batches of {BATCH_SIZE}...")
+
+            # Process documents in batches
+            for i in range(0, total_docs, BATCH_SIZE):
+                batch = documents[i:i + BATCH_SIZE]
+                batch_num = (i // BATCH_SIZE) + 1
+                total_batches = (total_docs + BATCH_SIZE - 1) // BATCH_SIZE
+
+                logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} documents)...")
+                self.vectorstore.add_documents(batch)
+                logger.info(f"✅ Batch {batch_num}/{total_batches} added successfully")
+
+            logger.info(f"✅ Successfully added all {total_docs} documents")
         except Exception as e:
             error_msg = f"Failed to add documents to vectorstore: {e}"
             logger.error(f"❌ {error_msg}")

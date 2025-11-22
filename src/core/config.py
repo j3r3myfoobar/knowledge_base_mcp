@@ -19,6 +19,7 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 # --- Document Processing ---
 CHUNK_SIZE = 512         # Characters per chunk
 CHUNK_OVERLAP = 50       # Overlap between chunks to preserve context
+BATCH_SIZE = 5000        # Maximum batch size for adding documents to ChromaDB
 
 # --- Retrieval Settings ---
 BM25_WEIGHT = 0.3        # Weight for BM25 keyword search in hybrid fusion
