@@ -291,7 +291,7 @@ class BaselineRetriever(Retriever):
             results.append({
                 'content': doc.page_content,
                 'metadata': doc.metadata,
-                'confidence': float(item['score'])
+                'confidence': min(1.0, float(item['score']))
             })
 
         logger.info(f"Hybrid search returned {len(results)} results")
@@ -340,7 +340,7 @@ class BaselineRetriever(Retriever):
                 formatted_results.append({
                     'content': doc.page_content,
                     'metadata': doc.metadata,
-                    'confidence': float(1.0 / (1.0 + score))  # Convert distance to confidence
+                    'confidence': min(1.0, float(1.0 / (1.0 + max(0.0, score))))  # Convert distance to confidence, clamped to [0, 1]
                 })
 
             return formatted_results
